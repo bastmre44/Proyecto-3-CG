@@ -1,4 +1,5 @@
 mod camera;
+mod flight;
 mod framebuffer;
 mod obj_loader;
 mod pipeline;
@@ -128,4 +129,3 @@ fn main() {
         std::process::exit(1);
     }
 }
-
