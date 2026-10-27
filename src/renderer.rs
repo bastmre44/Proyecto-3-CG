@@ -1,52 +1,60 @@
-use glam::Vec4;
+use glam::{Mat4, Vec3, Vec4};
 
 use crate::framebuffer::Framebuffer;
 use crate::obj_loader::Model;
 use crate::pipeline::{clip_triangle, to_screen};
 use crate::triangle::triangle;
 
-pub fn render(model: &Model, clip_vertices: &[Vec4], buffer: &mut Framebuffer) {
+pub fn render(
+    model: &Model,
+    clip_vertices: &[Vec4],
+    buffer: &mut Framebuffer,
+    model_matrix: Mat4,
+    base_color: u32,
+    unlit: bool,
+) {
+    let normal_matrix = model_matrix.inverse().transpose();
+    let light_direction = Vec3::new(-0.3, 0.8, 0.5).normalize();
+
     for face in &model.faces {
         let index_a = face[0];
         let index_b = face[1];
         let index_c = face[2];
 
-        let a = model.vertices[index_a];
-        let b = model.vertices[index_b];
-        let c = model.vertices[index_c];
+        let position = |index: usize| {
+            let vertex = model.vertices[index];
+            Vec3::new(vertex.x, vertex.y, vertex.z)
+        };
 
-        let ux = b.x - a.x;
-        let uy = b.y - a.y;
-        let uz = b.z - a.z;
+        let a = position(index_a);
+        let b = position(index_b);
+        let c = position(index_c);
 
-        let vx = c.x - a.x;
-        let vy = c.y - a.y;
-        let vz = c.z - a.z;
+        let original_normal = (b - a).cross(c - a);
 
-        let nx = uy * vz - uz * vy;
-        let ny = uz * vx - ux * vz;
-        let nz = ux * vy - uy * vx;
-
-        let normal_length = (nx * nx + ny * ny + nz * nz).sqrt();
-
-        if normal_length < 0.000001 {
+        if original_normal.length_squared() < 0.000000000001 {
             continue;
         }
 
-        let light_length = 0.98_f32.sqrt();
+        let normal = normal_matrix
+            .transform_vector3(original_normal)
+            .normalize_or_zero();
 
-        let diffuse =
-            ((nx * -0.3 + ny * 0.8 + nz * 0.5) / (normal_length * light_length)).clamp(0.0, 1.0);
+        let intensity = if unlit {
+            1.0
+        } else {
+            let diffuse = normal.dot(light_direction).clamp(0.0, 1.0);
+            0.35 + 0.65 * diffuse
+        };
 
-        let intensity = 0.35 + 0.65 * diffuse;
+        let red = ((base_color >> 16) & 255) as f32;
+        let green = ((base_color >> 8) & 255) as f32;
+        let blue = (base_color & 255) as f32;
 
-        let red = (182.0 * intensity) as u32;
-        let green = (163.0 * intensity) as u32;
-        let blue = (224.0 * intensity) as u32;
+        let color = (((red * intensity) as u32) << 16)
+            | (((green * intensity) as u32) << 8)
+            | ((blue * intensity) as u32);
 
-        let color = (red << 16) | (green << 8) | blue;
-
-        // Primero recortar; después dividir por w y convertir a píxeles.
         let clipped_triangles = clip_triangle([
             clip_vertices[index_a],
             clip_vertices[index_b],
