@@ -10,14 +10,22 @@ mod triangle;
 use std::time::Instant;
 
 use camera::Camera;
+use flight::{FlightController, FlightInput};
 use framebuffer::Framebuffer;
 use glam::{Mat4, Vec3};
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use obj_loader::Model;
 
 const WIDTH: usize = 1000;
 const HEIGHT: usize = 750;
 const BACKGROUND: u32 = 0x101522;
+
+fn input_axis(window: &Window, positive: Key, negative: Key) -> f32 {
+    let positive = window.is_key_down(positive) as i32;
+    let negative = window.is_key_down(negative) as i32;
+
+    (positive - negative) as f32
+}
 
 fn draw_object(
     model: &Model,
@@ -45,7 +53,6 @@ fn run() -> Result<(), String> {
         return Err("La nave no contiene geometría para dibujar".into());
     }
 
-    // Centro del modelo original de la nave.
     let mut minimum = Vec3::splat(f32::INFINITY);
     let mut maximum = Vec3::splat(f32::NEG_INFINITY);
 
@@ -56,20 +63,20 @@ fn run() -> Result<(), String> {
     }
 
     let center = (minimum + maximum) * 0.5;
+    let ship_start = Vec3::new(0.0, 0.4, 7.5);
 
-    // Primero centrar, luego escalar y finalmente colocar en el mundo.
-    let ship_matrix = Mat4::from_translation(Vec3::new(0.0, 0.4, 4.5))
-        * Mat4::from_scale(Vec3::splat(0.45))
-        * Mat4::from_translation(-center);
+    let mut flight = FlightController::new(ship_start);
+
+    let mut camera = Camera::new(
+        flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5,
+        flight.position + flight.forward() * 2.0,
+    );
 
     let sun_matrix = Mat4::from_scale(Vec3::splat(1.5));
-
-    let camera = Camera::new(Vec3::new(9.0, 7.0, 12.0), Vec3::ZERO);
-
     let mut buffer = Framebuffer::new(WIDTH, HEIGHT);
 
     let mut window = Window::new(
-        "Midnights - Sol y Lavender Haze",
+        "Midnights - Vuelo espacial",
         WIDTH,
         HEIGHT,
         WindowOptions::default(),
@@ -79,27 +86,61 @@ fn run() -> Result<(), String> {
     window.set_target_fps(60);
 
     let start = Instant::now();
+    let mut previous = start;
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        let elapsed = start.elapsed().as_secs_f32();
+        let now = Instant::now();
+        let delta_time = now.duration_since(previous).as_secs_f32();
+        let elapsed = now.duration_since(start).as_secs_f32();
+        previous = now;
 
-        // Ángulos calculados en radianes según los segundos transcurridos.
+        // R permite regresar si nos alejamos demasiado.
+        if window.is_key_pressed(Key::R, KeyRepeat::No) {
+            flight = FlightController::new(ship_start);
+
+            camera.position = flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5;
+
+            camera.target = flight.position + flight.forward() * 2.0;
+        }
+
+        let input = if window.is_active() {
+            FlightInput {
+                throttle: input_axis(&window, Key::W, Key::S),
+                yaw: input_axis(&window, Key::D, Key::A),
+                pitch: input_axis(&window, Key::Up, Key::Down),
+            }
+        } else {
+            FlightInput::default()
+        };
+
+        flight.update(&input, delta_time);
+
+        // Cámara detrás y ligeramente por encima de la nave.
+        let desired_position = flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5;
+
+        let desired_target = flight.position + flight.forward() * 2.0;
+
+        // Seguimiento suave calculado según el tiempo.
+        let follow = 1.0 - (-8.0 * delta_time).exp();
+
+        camera.position += (desired_position - camera.position) * follow;
+        camera.target += (desired_target - camera.target) * follow;
+
+        let ship_matrix = Mat4::from_scale_rotation_translation(
+            Vec3::splat(0.45),
+            flight.orientation(),
+            flight.position,
+        ) * Mat4::from_translation(-center);
+
         let orbit_angle = elapsed * 0.35;
         let rotation_angle = elapsed * 0.8;
 
-        let orbit_radius = 5.5;
-
-        let planet_position = Vec3::new(
-            orbit_angle.cos() * orbit_radius,
-            0.0,
-            orbit_angle.sin() * orbit_radius,
-        );
+        let planet_position = Vec3::new(orbit_angle.cos() * 5.5, 0.0, orbit_angle.sin() * 5.5);
 
         let planet_matrix = Mat4::from_translation(planet_position)
             * Mat4::from_rotation_y(rotation_angle)
             * Mat4::from_scale(Vec3::splat(1.1));
 
-        // Limpiar una sola vez antes de dibujar toda la escena.
         buffer.clear(BACKGROUND);
 
         draw_object(&sphere, sun_matrix, &camera, &mut buffer, 0xFFD17A, true);
