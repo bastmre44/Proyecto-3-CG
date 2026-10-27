@@ -1,4 +1,5 @@
 mod camera;
+mod collision;
 mod flight;
 mod framebuffer;
 mod obj_loader;
@@ -58,13 +59,29 @@ fn run() -> Result<(), String> {
 
     for vertex in &ship.vertices {
         let position = Vec3::new(vertex.x, vertex.y, vertex.z);
+
         minimum = minimum.min(position);
         maximum = maximum.max(position);
     }
 
     let center = (minimum + maximum) * 0.5;
-    let ship_start = Vec3::new(0.0, 0.4, 7.5);
 
+    let ship_scale = 0.45_f32;
+    let sun_radius = 1.5_f32;
+    let planet_radius = 1.1_f32;
+
+    // Radio de una esfera que contiene toda la nave.
+    let ship_radius = ship
+        .vertices
+        .iter()
+        .map(|vertex| Vec3::new(vertex.x, vertex.y, vertex.z).distance(center))
+        .fold(0.0_f32, f32::max)
+        * ship_scale;
+
+    // Separación suficiente para que la nave pueda pasar entre los cuerpos.
+    let orbit_radius = (sun_radius + planet_radius + 2.0 * ship_radius + 0.5).max(5.5);
+
+    let ship_start = Vec3::new(0.0, 0.4, 7.5);
     let mut flight = FlightController::new(ship_start);
 
     let mut camera = Camera::new(
@@ -72,7 +89,8 @@ fn run() -> Result<(), String> {
         flight.position + flight.forward() * 2.0,
     );
 
-    let sun_matrix = Mat4::from_scale(Vec3::splat(1.5));
+    let sun_matrix = Mat4::from_scale(Vec3::splat(sun_radius));
+
     let mut buffer = Framebuffer::new(WIDTH, HEIGHT);
 
     let mut window = Window::new(
@@ -94,7 +112,6 @@ fn run() -> Result<(), String> {
         let elapsed = now.duration_since(start).as_secs_f32();
         previous = now;
 
-        // R permite regresar si nos alejamos demasiado.
         if window.is_key_pressed(Key::R, KeyRepeat::No) {
             flight = FlightController::new(ship_start);
 
@@ -113,33 +130,63 @@ fn run() -> Result<(), String> {
             FlightInput::default()
         };
 
+        let previous_ship_position = flight.position;
+
         flight.update(&input, delta_time);
 
-        // Cámara detrás y ligeramente por encima de la nave.
+        let orbit_angle = elapsed * 0.35;
+        let previous_orbit_angle = (elapsed - delta_time).max(0.0) * 0.35;
+
+        let planet_position = Vec3::new(
+            orbit_angle.cos() * orbit_radius,
+            0.0,
+            orbit_angle.sin() * orbit_radius,
+        );
+
+        let previous_planet_position = Vec3::new(
+            previous_orbit_angle.cos() * orbit_radius,
+            0.0,
+            previous_orbit_angle.sin() * orbit_radius,
+        );
+
+        let bodies = [
+            (Vec3::ZERO, Vec3::ZERO, sun_radius),
+            (previous_planet_position, planet_position, planet_radius),
+        ];
+
+        for (previous_center, current_center, body_radius) in bodies {
+            if let Some(corrected_position) = collision::resolve_sphere_collision(
+                previous_ship_position,
+                flight.position,
+                previous_center,
+                current_center,
+                body_radius + ship_radius,
+            ) {
+                flight.position = corrected_position;
+            }
+        }
+
         let desired_position = flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5;
 
         let desired_target = flight.position + flight.forward() * 2.0;
 
-        // Seguimiento suave calculado según el tiempo.
         let follow = 1.0 - (-8.0 * delta_time).exp();
 
         camera.position += (desired_position - camera.position) * follow;
+
         camera.target += (desired_target - camera.target) * follow;
 
         let ship_matrix = Mat4::from_scale_rotation_translation(
-            Vec3::splat(0.45),
+            Vec3::splat(ship_scale),
             flight.orientation(),
             flight.position,
         ) * Mat4::from_translation(-center);
 
-        let orbit_angle = elapsed * 0.35;
         let rotation_angle = elapsed * 0.8;
-
-        let planet_position = Vec3::new(orbit_angle.cos() * 5.5, 0.0, orbit_angle.sin() * 5.5);
 
         let planet_matrix = Mat4::from_translation(planet_position)
             * Mat4::from_rotation_y(rotation_angle)
-            * Mat4::from_scale(Vec3::splat(1.1));
+            * Mat4::from_scale(Vec3::splat(planet_radius));
 
         buffer.clear(BACKGROUND);
 
