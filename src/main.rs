@@ -3,6 +3,7 @@ mod framebuffer;
 mod obj_loader;
 mod pipeline;
 mod renderer;
+mod sphere;
 mod triangle;
 
 use camera::Camera;
