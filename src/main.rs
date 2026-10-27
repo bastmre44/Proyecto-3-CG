@@ -2,6 +2,7 @@ mod camera;
 mod collision;
 mod flight;
 mod framebuffer;
+mod local_orbit;
 mod obj_loader;
 mod pipeline;
 mod renderer;
@@ -14,6 +15,7 @@ use camera::Camera;
 use flight::{FlightController, FlightInput};
 use framebuffer::Framebuffer;
 use glam::{Mat4, Vec3};
+use local_orbit::LocalOrbit;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use obj_loader::Model;
 
@@ -46,6 +48,12 @@ fn draw_object(
     renderer::render(model, &clip_vertices, buffer, model_matrix, color, unlit);
 }
 
+fn orbital_position(time: f32, radius: f32) -> Vec3 {
+    let angle = time * 0.35;
+
+    Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius)
+}
+
 fn run() -> Result<(), String> {
     let ship = obj_loader::load_obj("Nave_final.obj")?;
     let sphere = sphere::create_sphere(12, 24)?;
@@ -59,7 +67,6 @@ fn run() -> Result<(), String> {
 
     for vertex in &ship.vertices {
         let position = Vec3::new(vertex.x, vertex.y, vertex.z);
-
         minimum = minimum.min(position);
         maximum = maximum.max(position);
     }
@@ -70,7 +77,6 @@ fn run() -> Result<(), String> {
     let sun_radius = 1.5_f32;
     let planet_radius = 1.1_f32;
 
-    // Radio de una esfera que contiene toda la nave.
     let ship_radius = ship
         .vertices
         .iter()
@@ -78,11 +84,14 @@ fn run() -> Result<(), String> {
         .fold(0.0_f32, f32::max)
         * ship_scale;
 
-    // Separación suficiente para que la nave pueda pasar entre los cuerpos.
     let orbit_radius = (sun_radius + planet_radius + 2.0 * ship_radius + 0.5).max(5.5);
+
+    let local_min_distance = planet_radius + ship_radius + 0.01;
+    let local_activation_distance = local_min_distance + 4.0;
 
     let ship_start = Vec3::new(0.0, 0.4, 7.5);
     let mut flight = FlightController::new(ship_start);
+    let mut local_orbit: Option<LocalOrbit> = None;
 
     let mut camera = Camera::new(
         flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5,
@@ -90,11 +99,10 @@ fn run() -> Result<(), String> {
     );
 
     let sun_matrix = Mat4::from_scale(Vec3::splat(sun_radius));
-
     let mut buffer = Framebuffer::new(WIDTH, HEIGHT);
 
     let mut window = Window::new(
-        "Midnights - Vuelo espacial",
+        "Midnights - Vuelo libre",
         WIDTH,
         HEIGHT,
         WindowOptions::default(),
@@ -112,49 +120,64 @@ fn run() -> Result<(), String> {
         let elapsed = now.duration_since(start).as_secs_f32();
         previous = now;
 
+        let planet_position = orbital_position(elapsed, orbit_radius);
+        let previous_planet_position =
+            orbital_position((elapsed - delta_time).max(0.0), orbit_radius);
+
         if window.is_key_pressed(Key::R, KeyRepeat::No) {
             flight = FlightController::new(ship_start);
+            local_orbit = None;
 
             camera.position = flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5;
-
             camera.target = flight.position + flight.forward() * 2.0;
+            camera.up = Vec3::Y;
         }
 
         let input = if window.is_active() {
             FlightInput {
                 throttle: input_axis(&window, Key::W, Key::S),
-                yaw: input_axis(&window, Key::D, Key::A),
+                yaw: input_axis(&window, Key::A, Key::D),
                 pitch: input_axis(&window, Key::Up, Key::Down),
             }
         } else {
             FlightInput::default()
         };
 
+        // C cambia de modo, pero solo permite entrar cerca del planeta.
+        if window.is_active() && window.is_key_pressed(Key::C, KeyRepeat::No) {
+            if local_orbit.is_some() {
+                local_orbit = None;
+
+                let position = flight.position;
+                let forward = flight.forward();
+                flight.set_pose(position, forward);
+            } else if flight.position.distance(planet_position) <= local_activation_distance {
+                local_orbit = Some(LocalOrbit::new(
+                    flight.position,
+                    planet_position,
+                    local_min_distance,
+                ));
+            }
+        }
+
         let previous_ship_position = flight.position;
 
-        flight.update(&input, delta_time);
+        if let Some(orbit) = &mut local_orbit {
+            orbit.update(&input, delta_time);
 
-        let orbit_angle = elapsed * 0.35;
-        let previous_orbit_angle = (elapsed - delta_time).max(0.0) * 0.35;
-
-        let planet_position = Vec3::new(
-            orbit_angle.cos() * orbit_radius,
-            0.0,
-            orbit_angle.sin() * orbit_radius,
-        );
-
-        let previous_planet_position = Vec3::new(
-            previous_orbit_angle.cos() * orbit_radius,
-            0.0,
-            previous_orbit_angle.sin() * orbit_radius,
-        );
+            flight.set_pose(orbit.position(planet_position), orbit.forward());
+        } else {
+            flight.update(&input, delta_time);
+        }
 
         let bodies = [
             (Vec3::ZERO, Vec3::ZERO, sun_radius),
             (previous_planet_position, planet_position, planet_radius),
         ];
 
-        for (previous_center, current_center, body_radius) in bodies {
+        let mut collided = false;
+
+        for &(previous_center, current_center, body_radius) in &bodies {
             if let Some(corrected_position) = collision::resolve_sphere_collision(
                 previous_ship_position,
                 flight.position,
@@ -163,18 +186,91 @@ fn run() -> Result<(), String> {
                 body_radius + ship_radius,
             ) {
                 flight.position = corrected_position;
+                collided = true;
             }
         }
 
-        let desired_position = flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5;
+        if local_orbit.is_some() {
+            let forward = planet_position - flight.position;
+            flight.set_pose(flight.position, forward);
 
-        let desired_target = flight.position + flight.forward() * 2.0;
+            // Sincronizar la órbita si otro cuerpo corrigió la posición.
+            if collided {
+                local_orbit = Some(LocalOrbit::new(
+                    flight.position,
+                    planet_position,
+                    local_min_distance,
+                ));
+            }
+        }
 
+        let forward = flight.forward();
+        let up = flight.orientation() * Vec3::Y;
+        let right = forward.cross(up).normalize_or_zero();
+
+        let (desired_position, desired_target) = if local_orbit.is_some() {
+            // Vista lateral para que la nave no tape tanto al planeta.
+            (
+                flight.position - forward * 4.0 + up * 2.0 + right * 3.0,
+                planet_position,
+            )
+        } else {
+            (
+                flight.position - forward * 6.0 + up * 2.5,
+                flight.position + forward * 2.0,
+            )
+        };
+
+        let previous_camera_position = camera.position;
         let follow = 1.0 - (-8.0 * delta_time).exp();
 
         camera.position += (desired_position - camera.position) * follow;
-
         camera.target += (desired_target - camera.target) * follow;
+        camera.up = up;
+
+        // Evitar que la cámara termine dentro de un cuerpo.
+        for &(previous_center, current_center, body_radius) in &bodies {
+            if let Some(corrected_position) = collision::resolve_sphere_collision(
+                previous_camera_position,
+                camera.position,
+                previous_center,
+                current_center,
+                body_radius + 0.2,
+            ) {
+                camera.position = corrected_position;
+            }
+        }
+
+        let mut view_direction = camera.target - camera.position;
+
+        if view_direction.length_squared() < 0.000001 {
+            camera.target = camera.position + forward;
+            view_direction = forward;
+        }
+
+        let view_direction = view_direction.normalize();
+
+        if view_direction.cross(camera.up).length_squared() < 0.000001 {
+            camera.up = if view_direction.y.abs() < 0.99 {
+                Vec3::Y
+            } else {
+                Vec3::Z
+            };
+        }
+
+        let distance = flight.position.distance(planet_position);
+
+        let mode = if local_orbit.is_some() {
+            "LOCAL | C: volver a vuelo libre"
+        } else if distance <= local_activation_distance {
+            "LIBRE | C: activar modo local"
+        } else {
+            "LIBRE | Acercate al planeta para activar C"
+        };
+
+        window.set_title(&format!(
+            "Midnights | {mode} | Distancia: {distance:.1} | R: reiniciar"
+        ));
 
         let ship_matrix = Mat4::from_scale_rotation_translation(
             Vec3::splat(ship_scale),
@@ -182,10 +278,8 @@ fn run() -> Result<(), String> {
             flight.position,
         ) * Mat4::from_translation(-center);
 
-        let rotation_angle = elapsed * 0.8;
-
         let planet_matrix = Mat4::from_translation(planet_position)
-            * Mat4::from_rotation_y(rotation_angle)
+            * Mat4::from_rotation_y(elapsed * 0.8)
             * Mat4::from_scale(Vec3::splat(planet_radius));
 
         buffer.clear(BACKGROUND);

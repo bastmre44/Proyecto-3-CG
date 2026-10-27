@@ -36,6 +36,23 @@ impl FlightController {
         self.orientation() * Vec3::Z
     }
 
+    pub fn set_pose(&mut self, position: Vec3, forward: Vec3) {
+        let direction = forward.try_normalize().unwrap_or_else(|| self.forward());
+
+        self.position = position;
+
+        self.yaw = direction
+            .x
+            .atan2(direction.z)
+            .rem_euclid(std::f32::consts::TAU);
+
+        self.pitch = direction.y.clamp(-1.0, 1.0).asin();
+
+        self.speed = 0.0;
+        self.yaw_speed = 0.0;
+        self.pitch_speed = 0.0;
+    }
+
     pub fn update(&mut self, input: &FlightInput, delta_time: f32) {
         if !delta_time.is_finite() || delta_time <= 0.0 {
             return;
@@ -57,7 +74,10 @@ impl FlightController {
 
         self.yaw = (self.yaw + yaw_change).rem_euclid(std::f32::consts::TAU);
 
-        self.pitch = (self.pitch + pitch_change).clamp(-1.15, 1.15);
+        let lower = self.pitch.min(-1.15);
+        let upper = self.pitch.max(1.15);
+
+        self.pitch = (self.pitch + pitch_change).clamp(lower, upper);
 
         let distance = integrate_axis(
             &mut self.speed,
@@ -70,7 +90,7 @@ impl FlightController {
     }
 }
 
-// Suaviza la velocidad y calcula cuánto se avanzó durante este intervalo.
+// Suaviza la velocidad y calcula el desplazamiento del intervalo.
 fn integrate_axis(velocity: &mut f32, target: f32, response: f32, delta_time: f32) -> f32 {
     let decay = (-response * delta_time).exp();
 
@@ -80,6 +100,7 @@ fn integrate_axis(velocity: &mut f32, target: f32, response: f32, delta_time: f3
 
     displacement
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +161,21 @@ mod tests {
         }
 
         assert_eq!(controller.position, initial_position);
+        assert_eq!(controller.speed, 0.0);
+    }
+
+    #[test]
+    fn cambiar_de_modo_conserva_la_posicion_y_el_rumbo() {
+        let mut controller = FlightController::new(Vec3::ZERO);
+
+        let position = Vec3::new(3.0, 4.0, 5.0);
+        let direction = Vec3::new(0.0, -1.0, 0.0);
+
+        controller.set_pose(position, direction);
+        controller.update(&FlightInput::default(), 0.1);
+
+        assert_eq!(controller.position, position);
+        assert!(controller.forward().dot(direction) > 0.9999);
         assert_eq!(controller.speed, 0.0);
     }
 }
