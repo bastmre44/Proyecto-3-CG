@@ -1,10 +1,14 @@
 use glam::{Mat4, Vec3, Vec4};
 
-use crate::framebuffer::Framebuffer;
-use crate::obj_loader::Model;
-use crate::pipeline::{clip_triangle, to_screen};
-use crate::triangle::triangle;
+use crate::{
+    framebuffer::Framebuffer,
+    obj_loader::Model,
+    pipeline::{ShadedVertex, clip_shaded_triangle},
+    shader::Material,
+    triangle::shaded_triangle,
+};
 
+// Conserva la forma de dibujar la nave y el sol.
 pub fn render(
     model: &Model,
     clip_vertices: &[Vec4],
@@ -13,62 +17,66 @@ pub fn render(
     base_color: u32,
     unlit: bool,
 ) {
+    render_shaded(
+        model,
+        clip_vertices,
+        buffer,
+        model_matrix,
+        Material::Solid {
+            color: base_color,
+            unlit,
+        },
+        0.0,
+    );
+}
+
+pub fn render_shaded(
+    model: &Model,
+    clip_vertices: &[Vec4],
+    buffer: &mut Framebuffer,
+    model_matrix: Mat4,
+    material: Material,
+    time: f32,
+) {
     let normal_matrix = model_matrix.inverse().transpose();
-    let light_direction = Vec3::new(-0.3, 0.8, 0.5).normalize();
 
     for face in &model.faces {
-        let index_a = face[0];
-        let index_b = face[1];
-        let index_c = face[2];
-
-        let position = |index: usize| {
+        let positions = face.map(|index| {
             let vertex = model.vertices[index];
+
             Vec3::new(vertex.x, vertex.y, vertex.z)
-        };
+        });
 
-        let a = position(index_a);
-        let b = position(index_b);
-        let c = position(index_c);
+        let face_normal = (positions[1] - positions[0]).cross(positions[2] - positions[0]);
 
-        let original_normal = (b - a).cross(c - a);
-
-        if original_normal.length_squared() < 0.000000000001 {
+        if face_normal.length_squared() < 0.000000000001 {
             continue;
         }
 
-        let normal = normal_matrix
-            .transform_vector3(original_normal)
-            .normalize_or_zero();
+        let vertices = std::array::from_fn(|corner| {
+            let local_position = positions[corner];
 
-        let intensity = if unlit {
-            1.0
-        } else {
-            let diffuse = normal.dot(light_direction).clamp(0.0, 1.0);
-            0.35 + 0.65 * diffuse
-        };
+            let local_normal = match material {
+                // Para una esfera centrada en el origen,
+                // la normal apunta desde el centro hacia su superficie.
+                Material::LavenderHaze => local_position.normalize_or_zero(),
 
-        let red = ((base_color >> 16) & 255) as f32;
-        let green = ((base_color >> 8) & 255) as f32;
-        let blue = (base_color & 255) as f32;
-
-        let color = (((red * intensity) as u32) << 16)
-            | (((green * intensity) as u32) << 8)
-            | ((blue * intensity) as u32);
-
-        let clipped_triangles = clip_triangle([
-            clip_vertices[index_a],
-            clip_vertices[index_b],
-            clip_vertices[index_c],
-        ]);
-
-        for clipped in clipped_triangles {
-            let screen = clipped.map(|position| to_screen(position, buffer.width, buffer.height));
-
-            let [Some(screen_a), Some(screen_b), Some(screen_c)] = screen else {
-                continue;
+                Material::Solid { .. } => face_normal.normalize_or_zero(),
             };
 
-            triangle(buffer, screen_a, screen_b, screen_c, color);
+            let normal = normal_matrix
+                .transform_vector3(local_normal)
+                .normalize_or_zero();
+
+            ShadedVertex {
+                clip_position: clip_vertices[face[corner]],
+                local_position,
+                normal,
+            }
+        });
+
+        for triangle in clip_shaded_triangle(vertices) {
+            shaded_triangle(buffer, triangle, material, time);
         }
     }
 }

@@ -86,3 +86,153 @@ mod tests {
         assert!(buffer.pixels.iter().all(|&color| color == 0x101522));
     }
 }
+fn interpolate_fragment(
+    vertices: &[crate::pipeline::ShadedVertex; 3],
+    weights: [f32; 3],
+    time: f32,
+) -> Option<crate::shader::Fragment> {
+    // Corregimos los pesos usando la profundidad de cada vértice.
+    let corrected = [
+        weights[0] / vertices[0].clip_position.w,
+        weights[1] / vertices[1].clip_position.w,
+        weights[2] / vertices[2].clip_position.w,
+    ];
+
+    let total = corrected[0] + corrected[1] + corrected[2];
+
+    if !total.is_finite() || total <= 0.0 {
+        return None;
+    }
+
+    let weights = [
+        corrected[0] / total,
+        corrected[1] / total,
+        corrected[2] / total,
+    ];
+
+    let local_position = vertices[0].local_position * weights[0]
+        + vertices[1].local_position * weights[1]
+        + vertices[2].local_position * weights[2];
+
+    let normal = vertices[0].normal * weights[0]
+        + vertices[1].normal * weights[1]
+        + vertices[2].normal * weights[2];
+
+    Some(crate::shader::Fragment {
+        local_position,
+        normal,
+        time,
+    })
+}
+
+pub fn shaded_triangle(
+    buffer: &mut Framebuffer,
+    vertices: [crate::pipeline::ShadedVertex; 3],
+    material: crate::shader::Material,
+    time: f32,
+) {
+    if buffer.width == 0 || buffer.height == 0 {
+        return;
+    }
+
+    let screen = vertices.map(|vertex| {
+        crate::pipeline::to_screen(vertex.clip_position, buffer.width, buffer.height)
+    });
+
+    let [Some(a), Some(b), Some(c)] = screen else {
+        return;
+    };
+
+    let area = edge(a, b, c.x, c.y);
+
+    if !area.is_finite() || area.abs() < 0.000001 {
+        return;
+    }
+
+    let min_x = a.x.min(b.x).min(c.x).floor().max(0.0) as i32;
+    let max_x = a.x.max(b.x).max(c.x).ceil().min((buffer.width - 1) as f32) as i32;
+
+    let min_y = a.y.min(b.y).min(c.y).floor().max(0.0) as i32;
+    let max_y = a.y.max(b.y).max(c.y).ceil().min((buffer.height - 1) as f32) as i32;
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let sample_x = x as f32 + 0.5;
+            let sample_y = y as f32 + 0.5;
+
+            let wa = edge(b, c, sample_x, sample_y) / area;
+            let wb = edge(c, a, sample_x, sample_y) / area;
+            let wc = edge(a, b, sample_x, sample_y) / area;
+
+            if wa < 0.0 || wb < 0.0 || wc < 0.0 {
+                continue;
+            }
+
+            // La profundidad de pantalla usa los pesos originales.
+            let depth = a.z * wa + b.z * wb + c.z * wc;
+
+            let Some(fragment) = interpolate_fragment(&vertices, [wa, wb, wc], time) else {
+                continue;
+            };
+
+            let color = crate::shader::shade(material, &fragment);
+
+            buffer.point(x, y, depth, color);
+        }
+    }
+}
+
+#[cfg(test)]
+mod shaded_tests {
+    use super::*;
+    use crate::pipeline::ShadedVertex;
+    use crate::shader::Material;
+    use glam::{Vec3, Vec4};
+
+    #[test]
+    fn los_atributos_se_interpolan_con_correccion_de_perspectiva() {
+        let vertices = [
+            ShadedVertex {
+                clip_position: Vec4::new(0.0, 0.0, 0.0, 1.0),
+                local_position: Vec3::ZERO,
+                normal: Vec3::Z,
+            },
+            ShadedVertex {
+                clip_position: Vec4::new(0.0, 0.0, 0.0, 2.0),
+                local_position: Vec3::X,
+                normal: Vec3::Z,
+            },
+            ShadedVertex {
+                clip_position: Vec4::new(0.0, 0.0, 0.0, 4.0),
+                local_position: Vec3::Y,
+                normal: Vec3::Z,
+            },
+        ];
+
+        let fragment = interpolate_fragment(&vertices, [1.0 / 3.0; 3], 2.0).unwrap();
+
+        let expected = Vec3::new(2.0 / 7.0, 1.0 / 7.0, 0.0);
+
+        assert!(fragment.local_position.distance(expected) < 0.00001);
+        assert!(fragment.normal.distance(Vec3::Z) < 0.00001);
+        assert_eq!(fragment.time, 2.0);
+    }
+
+    #[test]
+    fn un_triangulo_sin_area_no_ejecuta_el_dibujo_del_shader() {
+        let mut buffer = Framebuffer::new(8, 8);
+        buffer.clear(0x101522);
+
+        let original = buffer.pixels.clone();
+
+        let vertex = ShadedVertex {
+            clip_position: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            local_position: Vec3::ZERO,
+            normal: Vec3::Z,
+        };
+
+        shaded_triangle(&mut buffer, [vertex; 3], Material::LavenderHaze, 0.0);
+
+        assert_eq!(buffer.pixels, original);
+    }
+}

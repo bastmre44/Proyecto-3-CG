@@ -168,3 +168,146 @@ mod tests {
         assert!(to_screen(Vec4::ZERO, 1000, 750).is_none());
     }
 }
+#[derive(Clone, Copy, Debug)]
+pub struct ShadedVertex {
+    pub clip_position: Vec4,
+    pub local_position: glam::Vec3,
+    pub normal: glam::Vec3,
+}
+
+impl ShadedVertex {
+    fn interpolate(self, other: Self, t: f32) -> Self {
+        Self {
+            clip_position: self.clip_position.lerp(other.clip_position, t),
+            local_position: self.local_position.lerp(other.local_position, t),
+            normal: self.normal.lerp(other.normal, t),
+        }
+    }
+}
+
+pub fn clip_shaded_triangle(vertices: [ShadedVertex; 3]) -> Vec<[ShadedVertex; 3]> {
+    if vertices.iter().any(|vertex| {
+        !vertex.clip_position.is_finite()
+            || !vertex.local_position.is_finite()
+            || !vertex.normal.is_finite()
+    }) {
+        return Vec::new();
+    }
+
+    let planes = [
+        Vec4::new(1.0, 0.0, 0.0, 1.0),
+        Vec4::new(-1.0, 0.0, 0.0, 1.0),
+        Vec4::new(0.0, 1.0, 0.0, 1.0),
+        Vec4::new(0.0, -1.0, 0.0, 1.0),
+        Vec4::new(0.0, 0.0, 1.0, 1.0),
+        Vec4::new(0.0, 0.0, -1.0, 1.0),
+    ];
+
+    let mut polygon = vertices.to_vec();
+
+    for plane in planes {
+        if polygon.is_empty() {
+            break;
+        }
+
+        let mut output = Vec::new();
+
+        let mut previous = polygon[polygon.len() - 1];
+        let mut previous_distance = plane.dot(previous.clip_position);
+
+        for current in polygon {
+            let current_distance = plane.dot(current.clip_position);
+
+            let previous_inside = previous_distance >= 0.0;
+            let current_inside = current_distance >= 0.0;
+
+            if previous_inside != current_inside {
+                let t = previous_distance / (previous_distance - current_distance);
+
+                output.push(previous.interpolate(current, t));
+            }
+
+            if current_inside {
+                output.push(current);
+            }
+
+            previous = current;
+            previous_distance = current_distance;
+        }
+
+        polygon = output;
+    }
+
+    let mut triangles = Vec::new();
+
+    for index in 1..polygon.len().saturating_sub(1) {
+        triangles.push([polygon[0], polygon[index], polygon[index + 1]]);
+    }
+
+    triangles
+}
+
+#[cfg(test)]
+mod shaded_tests {
+    use super::*;
+    use glam::Vec3;
+
+    fn vertex(position: Vec4, local_position: Vec3) -> ShadedVertex {
+        ShadedVertex {
+            clip_position: position,
+            local_position,
+            normal: Vec3::Z,
+        }
+    }
+
+    #[test]
+    fn el_recorte_conserva_los_atributos_de_un_triangulo_interior() {
+        let vertices = [
+            vertex(Vec4::new(-0.5, -0.5, 0.0, 1.0), Vec3::X),
+            vertex(Vec4::new(0.5, -0.5, 0.0, 1.0), Vec3::Y),
+            vertex(Vec4::new(0.0, 0.5, 0.0, 1.0), Vec3::Z),
+        ];
+
+        let triangles = clip_shaded_triangle(vertices);
+
+        assert_eq!(triangles.len(), 1);
+
+        for (actual, expected) in triangles[0].iter().zip(vertices) {
+            assert_eq!(actual.clip_position, expected.clip_position);
+            assert_eq!(actual.local_position, expected.local_position);
+            assert_eq!(actual.normal, expected.normal);
+        }
+    }
+
+    #[test]
+    fn el_recorte_interpola_los_atributos_en_el_borde() {
+        let vertices = [
+            vertex(Vec4::new(-2.0, 0.0, 0.0, 1.0), Vec3::ZERO),
+            vertex(Vec4::new(0.0, -0.5, 0.0, 1.0), Vec3::X * 2.0),
+            vertex(Vec4::new(0.0, 0.5, 0.0, 1.0), Vec3::Y * 2.0),
+        ];
+
+        let triangles = clip_shaded_triangle(vertices);
+
+        assert_eq!(triangles.len(), 2);
+
+        let mut found_x = false;
+        let mut found_y = false;
+
+        for vertex in triangles.iter().flatten() {
+            let position = vertex.clip_position;
+
+            assert!(position.x.abs() <= position.w + 0.0001);
+            assert!(position.y.abs() <= position.w + 0.0001);
+            assert!(position.z.abs() <= position.w + 0.0001);
+
+            if (position.x + 1.0).abs() < 0.0001 {
+                found_x |= vertex.local_position.distance(Vec3::X) < 0.0001;
+                found_y |= vertex.local_position.distance(Vec3::Y) < 0.0001;
+            }
+        }
+
+        assert!(found_x);
+        assert!(found_y);
+    }
+}

@@ -6,6 +6,7 @@ mod local_orbit;
 mod obj_loader;
 mod pipeline;
 mod renderer;
+mod shader;
 mod sphere;
 mod triangle;
 
@@ -46,6 +47,23 @@ fn draw_object(
     );
 
     renderer::render(model, &clip_vertices, buffer, model_matrix, color, unlit);
+}
+fn draw_shaded_object(
+    model: &Model,
+    model_matrix: Mat4,
+    camera: &Camera,
+    buffer: &mut Framebuffer,
+    material: shader::Material,
+    time: f32,
+) {
+    let clip_vertices = pipeline::transform_vertices(
+        model,
+        model_matrix,
+        camera.view_matrix(),
+        camera.projection_matrix(buffer.width, buffer.height),
+    );
+
+    renderer::render_shaded(model, &clip_vertices, buffer, model_matrix, material, time);
 }
 
 fn orbital_position(time: f32, radius: f32) -> Vec3 {
@@ -286,13 +304,13 @@ fn run() -> Result<(), String> {
 
         draw_object(&sphere, sun_matrix, &camera, &mut buffer, 0xFFD17A, true);
 
-        draw_object(
+        draw_shaded_object(
             &sphere,
             planet_matrix,
             &camera,
             &mut buffer,
-            0xB6A3E0,
-            false,
+            shader::Material::LavenderHaze,
+            elapsed,
         );
 
         draw_object(&ship, ship_matrix, &camera, &mut buffer, 0x385794, false);
