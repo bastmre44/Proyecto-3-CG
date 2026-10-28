@@ -2,6 +2,7 @@ mod camera;
 mod collision;
 mod flight;
 mod framebuffer;
+mod koi;
 mod local_orbit;
 mod obj_loader;
 mod pipeline;
@@ -15,7 +16,7 @@ use std::time::Instant;
 use camera::Camera;
 use flight::{FlightController, FlightInput};
 use framebuffer::Framebuffer;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use local_orbit::LocalOrbit;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use obj_loader::Model;
@@ -48,6 +49,7 @@ fn draw_object(
 
     renderer::render(model, &clip_vertices, buffer, model_matrix, color, unlit);
 }
+
 fn draw_shaded_object(
     model: &Model,
     model_matrix: Mat4,
@@ -75,6 +77,7 @@ fn orbital_position(time: f32, radius: f32) -> Vec3 {
 fn run() -> Result<(), String> {
     let ship = obj_loader::load_obj("Nave_final.obj")?;
     let sphere = sphere::create_sphere(12, 24)?;
+    let koi_model = koi::create_koi()?;
 
     if ship.vertices.is_empty() || ship.faces.is_empty() {
         return Err("La nave no contiene geometría para dibujar".into());
@@ -85,6 +88,7 @@ fn run() -> Result<(), String> {
 
     for vertex in &ship.vertices {
         let position = Vec3::new(vertex.x, vertex.y, vertex.z);
+
         minimum = minimum.min(position);
         maximum = maximum.max(position);
     }
@@ -95,6 +99,7 @@ fn run() -> Result<(), String> {
     let sun_radius = 1.5_f32;
     let planet_radius = 1.1_f32;
 
+    // Esfera que contiene toda la geometría de la nave.
     let ship_radius = ship
         .vertices
         .iter()
@@ -108,6 +113,7 @@ fn run() -> Result<(), String> {
     let local_activation_distance = local_min_distance + 4.0;
 
     let ship_start = Vec3::new(0.0, 0.4, 7.5);
+
     let mut flight = FlightController::new(ship_start);
     let mut local_orbit: Option<LocalOrbit> = None;
 
@@ -134,20 +140,26 @@ fn run() -> Result<(), String> {
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         let now = Instant::now();
+
         let delta_time = now.duration_since(previous).as_secs_f32();
         let elapsed = now.duration_since(start).as_secs_f32();
+
         previous = now;
 
         let planet_position = orbital_position(elapsed, orbit_radius);
+
         let previous_planet_position =
             orbital_position((elapsed - delta_time).max(0.0), orbit_radius);
 
+        // Reiniciar la nave y la cámara.
         if window.is_key_pressed(Key::R, KeyRepeat::No) {
             flight = FlightController::new(ship_start);
             local_orbit = None;
 
             camera.position = flight.position - flight.forward() * 6.0 + Vec3::Y * 2.5;
+
             camera.target = flight.position + flight.forward() * 2.0;
+
             camera.up = Vec3::Y;
         }
 
@@ -161,13 +173,14 @@ fn run() -> Result<(), String> {
             FlightInput::default()
         };
 
-        // C cambia de modo, pero solo permite entrar cerca del planeta.
+        // Entrar al modo local únicamente cerca del planeta.
         if window.is_active() && window.is_key_pressed(Key::C, KeyRepeat::No) {
             if local_orbit.is_some() {
                 local_orbit = None;
 
                 let position = flight.position;
                 let forward = flight.forward();
+
                 flight.set_pose(position, forward);
             } else if flight.position.distance(planet_position) <= local_activation_distance {
                 local_orbit = Some(LocalOrbit::new(
@@ -210,9 +223,10 @@ fn run() -> Result<(), String> {
 
         if local_orbit.is_some() {
             let forward = planet_position - flight.position;
+
             flight.set_pose(flight.position, forward);
 
-            // Sincronizar la órbita si otro cuerpo corrigió la posición.
+            // Actualizar el modo local si una colisión movió la nave.
             if collided {
                 local_orbit = Some(LocalOrbit::new(
                     flight.position,
@@ -227,7 +241,7 @@ fn run() -> Result<(), String> {
         let right = forward.cross(up).normalize_or_zero();
 
         let (desired_position, desired_target) = if local_orbit.is_some() {
-            // Vista lateral para que la nave no tape tanto al planeta.
+            // Cámara lateral para observar el planeta.
             (
                 flight.position - forward * 4.0 + up * 2.0 + right * 3.0,
                 planet_position,
@@ -243,10 +257,12 @@ fn run() -> Result<(), String> {
         let follow = 1.0 - (-8.0 * delta_time).exp();
 
         camera.position += (desired_position - camera.position) * follow;
+
         camera.target += (desired_target - camera.target) * follow;
+
         camera.up = up;
 
-        // Evitar que la cámara termine dentro de un cuerpo.
+        // Evitar que la cámara termine dentro del sol o planeta.
         for &(previous_center, current_center, body_radius) in &bodies {
             if let Some(corrected_position) = collision::resolve_sphere_collision(
                 previous_camera_position,
@@ -302,8 +318,10 @@ fn run() -> Result<(), String> {
 
         buffer.clear(BACKGROUND);
 
+        // Sol.
         draw_object(&sphere, sun_matrix, &camera, &mut buffer, 0xFFD17A, true);
 
+        // Lavender Haze.
         draw_shaded_object(
             &sphere,
             planet_matrix,
@@ -313,6 +331,41 @@ fn run() -> Result<(), String> {
             elapsed,
         );
 
+        // Dos koi nadando alrededor del planeta.
+        let koi_orbit_radius = planet_radius + 1.0;
+        let orbit_tilt = Quat::from_rotation_x(0.3);
+
+        for index in 0..2 {
+            let phase = index as f32 * std::f32::consts::PI;
+            let angle = elapsed * 0.5 + phase;
+
+            let offset = Vec3::new(
+                angle.cos() * koi_orbit_radius,
+                0.0,
+                angle.sin() * koi_orbit_radius,
+            );
+
+            let position = planet_position + orbit_tilt * offset;
+
+            // Orientación tangente al recorrido.
+            let orientation = orbit_tilt * Quat::from_rotation_y(-angle);
+
+            let koi_matrix =
+                Mat4::from_scale_rotation_translation(Vec3::splat(0.65), orientation, position);
+
+            let swimming_koi = koi::animate_koi(&koi_model, elapsed, phase);
+
+            draw_shaded_object(
+                &swimming_koi,
+                koi_matrix,
+                &camera,
+                &mut buffer,
+                shader::Material::Koi,
+                elapsed,
+            );
+        }
+
+        // Nave.
         draw_object(&ship, ship_matrix, &camera, &mut buffer, 0x385794, false);
 
         window
