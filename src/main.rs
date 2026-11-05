@@ -5,6 +5,8 @@ mod framebuffer;
 mod koi;
 mod local_orbit;
 mod obj_loader;
+mod opalite;
+mod opalite_plaza;
 mod ophelia;
 mod ophelia_garden;
 mod pipeline;
@@ -56,10 +58,12 @@ impl Planet {
     }
 
     fn collision_radius(&self) -> f32 {
-        if matches!(self.material, Material::Ophelia) {
-            self.radius * ophelia_garden::BOUND_RADIUS
-        } else {
-            self.radius
+        match self.material {
+            Material::Ophelia => self.radius * ophelia_garden::BOUND_RADIUS,
+
+            Material::Opalite => self.radius * opalite::BOUND_RADIUS,
+
+            _ => self.radius,
         }
     }
 
@@ -120,6 +124,8 @@ fn run() -> Result<(), String> {
     let sphere = sphere::create_sphere(12, 24)?;
     let koi_model = koi::create_koi()?;
     let garden = ophelia_garden::create_garden();
+    let opalite_crystals = opalite::create_crystals();
+    let plaza = opalite_plaza::create_plaza()?;
 
     if ship.vertices.is_empty() || ship.faces.is_empty() {
         return Err("La nave no contiene geometría para dibujar".into());
@@ -154,8 +160,10 @@ fn run() -> Result<(), String> {
 
     let lavender_orbit = (sun_radius + lavender_extent + 2.0 * ship_radius + 0.5).max(5.5);
 
+    let midnight_extent = midnight_radius * opalite::BOUND_RADIUS;
+
     let midnight_orbit =
-        lavender_orbit + lavender_extent + midnight_radius + 2.0 * ship_radius + 0.8;
+        lavender_orbit + lavender_extent + midnight_extent + 2.0 * ship_radius + 0.8;
 
     let planets = [
         Planet {
@@ -168,13 +176,13 @@ fn run() -> Result<(), String> {
             material: Material::Ophelia,
         },
         Planet {
-            name: "Midnight Rain",
+            name: "Opalite",
             radius: midnight_radius,
             orbit_radius: midnight_orbit,
             orbit_speed: 0.18,
             orbit_phase: 2.2,
-            rotation_speed: 0.35,
-            material: Material::MidnightRain,
+            rotation_speed: 0.10,
+            material: Material::Opalite,
         },
     ];
 
@@ -430,6 +438,31 @@ fn run() -> Result<(), String> {
             draw_object(
                 &part.model,
                 ophelia_matrix,
+                &camera,
+                &mut buffer,
+                part.color,
+                false,
+            );
+        }
+
+        // Los cristales comparten la transformación de Opalite.
+        let opalite_matrix = planets[1].model_matrix(elapsed);
+
+        for part in &opalite_crystals {
+            draw_object(
+                &part.model,
+                opalite_matrix,
+                &camera,
+                &mut buffer,
+                part.color,
+                false,
+            );
+        }
+
+        for part in &plaza {
+            draw_object(
+                &part.model,
+                opalite_matrix,
                 &camera,
                 &mut buffer,
                 part.color,

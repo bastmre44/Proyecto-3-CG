@@ -7,6 +7,7 @@ pub enum Material {
     Koi,
     MidnightRain,
     Ophelia,
+    Opalite,
 }
 
 pub struct Fragment {
@@ -26,6 +27,10 @@ pub fn shade(material: Material, fragment: &Fragment) -> u32 {
             crate::ophelia::water_color(fragment.local_position, fragment.time),
             false,
         ),
+        Material::Opalite => (
+            crate::opalite::surface_color(fragment.local_position, fragment.time),
+            false,
+        ),
     };
 
     let intensity = if unlit {
@@ -35,7 +40,7 @@ pub fn shade(material: Material, fragment: &Fragment) -> u32 {
 
         let normal = fragment.normal.normalize_or_zero();
 
-        0.35 + 0.65 * normal.dot(light_direction).clamp(0.0, 1.0)
+        0.68 + 0.32 * normal.dot(light_direction).clamp(0.0, 1.0)
     };
 
     pack_color(base_color * intensity)

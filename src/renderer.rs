@@ -63,7 +63,9 @@ pub fn render_shaded(
                     local_position.normalize_or_zero()
                 }
 
-                Material::Solid { .. } | Material::Koi => face_normal.normalize_or_zero(),
+                Material::Solid { .. } | Material::Koi | Material::Opalite => {
+                    face_normal.normalize_or_zero()
+                }
             };
 
             let normal = normal_matrix

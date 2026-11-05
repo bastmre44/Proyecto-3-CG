@@ -6,8 +6,8 @@ pub fn water_color(position: Vec3, time: f32) -> Vec3 {
     // Variaciones amplias de profundidad aparente.
     let depth_pattern = (p.x * 3.5 + p.z * 2.8 + (p.y * 4.0).sin() * 0.7).sin() * 0.5 + 0.5;
 
-    let deep = Vec3::new(0.025, 0.30, 0.35);
-    let turquoise = Vec3::new(0.04, 0.67, 0.66);
+    let deep = Vec3::new(0.02, 0.42, 0.45);
+    let turquoise = Vec3::new(0.03, 0.85, 0.77);
 
     let mut color = deep.lerp(turquoise, depth_pattern);
 
