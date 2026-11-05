@@ -8,6 +8,7 @@ pub enum Material {
     MidnightRain,
     Ophelia,
     Opalite,
+    PatientZero,
 }
 
 pub struct Fragment {
@@ -29,6 +30,10 @@ pub fn shade(material: Material, fragment: &Fragment) -> u32 {
         ),
         Material::Opalite => (
             crate::opalite::surface_color(fragment.local_position, fragment.time),
+            false,
+        ),
+        Material::PatientZero => (
+            crate::patient_zero::surface_color(fragment.local_position),
             false,
         ),
     };

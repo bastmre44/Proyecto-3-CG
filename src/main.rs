@@ -9,6 +9,9 @@ mod opalite;
 mod opalite_plaza;
 mod ophelia;
 mod ophelia_garden;
+mod patient_garden;
+mod patient_manor;
+mod patient_zero;
 mod pipeline;
 mod renderer;
 mod shader;
@@ -62,6 +65,8 @@ impl Planet {
             Material::Ophelia => self.radius * ophelia_garden::BOUND_RADIUS,
 
             Material::Opalite => self.radius * opalite::BOUND_RADIUS,
+
+            Material::PatientZero => self.radius * patient_zero::BOUND_RADIUS,
 
             _ => self.radius,
         }
@@ -126,6 +131,9 @@ fn run() -> Result<(), String> {
     let garden = ophelia_garden::create_garden();
     let opalite_crystals = opalite::create_crystals();
     let plaza = opalite_plaza::create_plaza()?;
+    let patient_surface = patient_zero::create_surface(12, 24)?;
+    let manor = patient_manor::create_manor();
+    let patient_garden = patient_garden::create_garden();
 
     if ship.vertices.is_empty() || ship.faces.is_empty() {
         return Err("La nave no contiene geometría para dibujar".into());
@@ -165,6 +173,12 @@ fn run() -> Result<(), String> {
     let midnight_orbit =
         lavender_orbit + lavender_extent + midnight_extent + 2.0 * ship_radius + 0.8;
 
+    let patient_radius = 1.2_f32;
+
+    let patient_extent = patient_radius * patient_zero::BOUND_RADIUS;
+
+    let patient_orbit = midnight_orbit + midnight_extent + patient_extent + 2.0 * ship_radius + 0.8;
+
     let planets = [
         Planet {
             name: "The Fate of Ophelia",
@@ -183,6 +197,15 @@ fn run() -> Result<(), String> {
             orbit_phase: 2.2,
             rotation_speed: 0.10,
             material: Material::Opalite,
+        },
+        Planet {
+            name: "Patient Zero",
+            radius: patient_radius,
+            orbit_radius: patient_orbit,
+            orbit_speed: 0.12,
+            orbit_phase: 4.2,
+            rotation_speed: 0.08,
+            material: Material::PatientZero,
         },
     ];
 
@@ -420,8 +443,14 @@ fn run() -> Result<(), String> {
         draw_object(&sphere, sun_matrix, &camera, &mut buffer, 0xFFD17A, true);
 
         for planet in &planets {
+            let model = if matches!(planet.material, Material::PatientZero) {
+                &patient_surface
+            } else {
+                &sphere
+            };
+
             draw_shaded_object(
-                &sphere,
+                model,
                 planet.model_matrix(elapsed),
                 &camera,
                 &mut buffer,
@@ -463,6 +492,31 @@ fn run() -> Result<(), String> {
             draw_object(
                 &part.model,
                 opalite_matrix,
+                &camera,
+                &mut buffer,
+                part.color,
+                false,
+            );
+        }
+
+        // La mansión acompaña la órbita y rotación de Patient Zero.
+        let patient_matrix = planets[2].model_matrix(elapsed);
+
+        for part in &manor {
+            draw_object(
+                &part.model,
+                patient_matrix,
+                &camera,
+                &mut buffer,
+                part.color,
+                part.unlit,
+            );
+        }
+
+        for part in &patient_garden {
+            draw_object(
+                &part.model,
+                patient_matrix,
                 &camera,
                 &mut buffer,
                 part.color,
