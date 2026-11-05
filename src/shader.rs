@@ -5,6 +5,8 @@ pub enum Material {
     Solid { color: u32, unlit: bool },
     LavenderHaze,
     Koi,
+    MidnightRain,
+    Ophelia,
 }
 
 pub struct Fragment {
@@ -19,6 +21,11 @@ pub fn shade(material: Material, fragment: &Fragment) -> u32 {
 
         Material::LavenderHaze => (lavender_haze(fragment.local_position, fragment.time), false),
         Material::Koi => (koi_color(fragment.local_position), false),
+        Material::MidnightRain => (midnight_rain(fragment.local_position, fragment.time), false),
+        Material::Ophelia => (
+            crate::ophelia::water_color(fragment.local_position, fragment.time),
+            false,
+        ),
     };
 
     let intensity = if unlit {
@@ -176,4 +183,45 @@ fn koi_color(position: Vec3) -> Vec3 {
     } else {
         white
     }
+}
+
+fn midnight_rain(position: Vec3, time: f32) -> Vec3 {
+    let direction = position.normalize_or_zero();
+
+    // Patrón fijo de islas sobre la superficie.
+    let terrain = (direction.x * 6.0 + direction.z * 3.0).sin()
+        * (direction.y * 5.0 - direction.z * 4.0).cos()
+        + (direction.z * 9.0 + direction.x * 4.0).sin() * 0.25;
+
+    let deep_ocean = Vec3::new(0.025, 0.07, 0.22);
+    let shallow_ocean = Vec3::new(0.05, 0.35, 0.48);
+    let coast = Vec3::new(0.38, 0.64, 0.63);
+    let land = Vec3::new(0.12, 0.27, 0.32);
+
+    let surface = if terrain > 0.40 {
+        let inland = smooth_transition(0.40, 0.65, terrain);
+        coast.lerp(land, inland)
+    } else {
+        let shallow = smooth_transition(0.05, 0.40, terrain);
+        deep_ocean.lerp(shallow_ocean, shallow)
+    };
+
+    // Las nubes se desplazan alrededor del eje Y.
+    let angle = time * 0.12;
+    let (sin_angle, cos_angle) = angle.sin_cos();
+
+    let cloud_position = Vec3::new(
+        direction.x * cos_angle - direction.z * sin_angle,
+        direction.y,
+        direction.x * sin_angle + direction.z * cos_angle,
+    );
+
+    let clouds = (cloud_position.x * 9.0 + (cloud_position.z * 5.0).sin() * 2.0).sin()
+        * (cloud_position.y * 11.0 - cloud_position.z * 6.0).cos();
+
+    let cloud_cover = smooth_transition(0.35, 0.85, clouds) * 0.75;
+
+    let cloud_color = Vec3::new(0.72, 0.79, 0.91);
+
+    surface.lerp(cloud_color, cloud_cover)
 }

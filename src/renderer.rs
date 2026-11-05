@@ -59,7 +59,9 @@ pub fn render_shaded(
             let local_normal = match material {
                 // Para una esfera centrada en el origen,
                 // la normal apunta desde el centro hacia su superficie.
-                Material::LavenderHaze => local_position.normalize_or_zero(),
+                Material::LavenderHaze | Material::MidnightRain | Material::Ophelia => {
+                    local_position.normalize_or_zero()
+                }
 
                 Material::Solid { .. } | Material::Koi => face_normal.normalize_or_zero(),
             };
