@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 glam = "=0.30.9"
 minifb = "0.28.0"
+rodio = { version = "=0.21.1", default-features = false, features = ["playback", "mp3"] }

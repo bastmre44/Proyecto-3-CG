@@ -9,12 +9,16 @@ pub enum Material {
     Ophelia,
     Opalite,
     PatientZero,
+    PinkClouding,
+    Showgirl,
+    Sun,
 }
 
 pub struct Fragment {
     pub local_position: Vec3,
     pub normal: Vec3,
     pub time: f32,
+    pub footprint: f32,
 }
 
 pub fn shade(material: Material, fragment: &Fragment) -> u32 {
@@ -30,6 +34,23 @@ pub fn shade(material: Material, fragment: &Fragment) -> u32 {
         ),
         Material::Opalite => (
             crate::opalite::surface_color(fragment.local_position, fragment.time),
+            false,
+        ),
+        Material::PinkClouding => (
+            crate::pink_clouding::surface_color_filtered(
+                fragment.local_position,
+                fragment.time,
+                fragment.footprint,
+            ),
+            false,
+        ),
+        Material::Sun => (crate::sun::color(fragment.normal, fragment.time), true),
+        Material::Showgirl => (
+            crate::showgirl::surface_color_filtered(
+                fragment.local_position,
+                fragment.time,
+                fragment.footprint,
+            ),
             false,
         ),
         Material::PatientZero => (
@@ -128,6 +149,7 @@ mod tests {
             local_position: Vec3::ZERO,
             normal: Vec3::ZERO,
             time: 0.0,
+            footprint: 0.0,
         };
 
         let color = shade(
@@ -147,6 +169,7 @@ mod tests {
             local_position: Vec3::Y,
             normal: Vec3::Y,
             time: 0.0,
+            footprint: 0.0,
         };
 
         let initial = shade(Material::LavenderHaze, &fragment);

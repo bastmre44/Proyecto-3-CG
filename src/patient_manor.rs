@@ -362,13 +362,7 @@ fn add_geometry(model: &mut Model, transform: Mat4, positions: &[Vec3], faces: &
     }
 }
 
-fn add_beam(
-    model: &mut Model,
-    transform: Mat4,
-    start: Vec3,
-    end: Vec3,
-    thickness: f32,
-) {
+fn add_beam(model: &mut Model, transform: Mat4, start: Vec3, end: Vec3, thickness: f32) {
     let direction = end - start;
     let length = direction.length();
 

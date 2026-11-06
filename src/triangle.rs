@@ -122,6 +122,7 @@ fn interpolate_fragment(
         local_position,
         normal,
         time,
+        footprint: 0.0,
     })
 }
 
@@ -155,6 +156,41 @@ pub fn shaded_triangle(
     let min_y = a.y.min(b.y).min(c.y).floor().max(0.0) as i32;
     let max_y = a.y.max(b.y).max(c.y).ceil().min((buffer.height - 1) as f32) as i32;
 
+    // Solid procedural parts have one face normal and color: shade once per triangle.
+    let flat = match material {
+        crate::shader::Material::Solid { unlit: true, .. } => true,
+        crate::shader::Material::Solid { .. } | crate::shader::Material::Sun => {
+            vertices[0].normal == vertices[1].normal && vertices[0].normal == vertices[2].normal
+        }
+        _ => false,
+    };
+    let flat_color = flat.then(|| {
+        crate::shader::shade(
+            material,
+            &crate::shader::Fragment {
+                local_position: vertices[0].local_position,
+                normal: vertices[0].normal,
+                time,
+                footprint: 0.0,
+            },
+        )
+    });
+    let filtered = matches!(
+        material,
+        crate::shader::Material::Showgirl | crate::shader::Material::PinkClouding
+    );
+    let inv_w = vertices.map(|v| 1.0 / v.clip_position.w);
+    let dx = [(b.y - c.y) / area, (c.y - a.y) / area, (a.y - b.y) / area];
+    let dy = [(c.x - b.x) / area, (a.x - c.x) / area, (b.x - a.x) / area];
+    let dqdx = (0..3).map(|i| dx[i] * inv_w[i]).sum::<f32>();
+    let dqdy = (0..3).map(|i| dy[i] * inv_w[i]).sum::<f32>();
+    let dndx = (0..3)
+        .map(|i| vertices[i].local_position * (dx[i] * inv_w[i]))
+        .sum::<glam::Vec3>();
+    let dndy = (0..3)
+        .map(|i| vertices[i].local_position * (dy[i] * inv_w[i]))
+        .sum::<glam::Vec3>();
+
     for y in min_y..=max_y {
         for x in min_x..=max_x {
             let sample_x = x as f32 + 0.5;
@@ -171,10 +207,23 @@ pub fn shaded_triangle(
             // La profundidad de pantalla usa los pesos originales.
             let depth = a.z * wa + b.z * wb + c.z * wc;
 
-            let Some(fragment) = interpolate_fragment(&vertices, [wa, wb, wc], time) else {
+            if !buffer.visible(x, y, depth) {
+                continue;
+            }
+            if let Some(color) = flat_color {
+                buffer.point(x, y, depth, color);
+                continue;
+            }
+            let Some(mut fragment) = interpolate_fragment(&vertices, [wa, wb, wc], time) else {
                 continue;
             };
 
+            if filtered {
+                let q = wa * inv_w[0] + wb * inv_w[1] + wc * inv_w[2];
+                let px = (dndx - fragment.local_position * dqdx) / q;
+                let py = (dndy - fragment.local_position * dqdy) / q;
+                fragment.footprint = px.length_squared().max(py.length_squared()).sqrt();
+            }
             let color = crate::shader::shade(material, &fragment);
 
             buffer.point(x, y, depth, color);

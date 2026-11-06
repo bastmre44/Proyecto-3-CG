@@ -54,6 +54,10 @@ impl FlightController {
     }
 
     pub fn update(&mut self, input: &FlightInput, delta_time: f32) {
+        self.update_with_speed(input, delta_time, crate::navigation::CRUISE_SPEED);
+    }
+
+    pub fn update_with_speed(&mut self, input: &FlightInput, delta_time: f32, max_speed: f32) {
         if !delta_time.is_finite() || delta_time <= 0.0 {
             return;
         }
@@ -81,7 +85,7 @@ impl FlightController {
 
         let distance = integrate_axis(
             &mut self.speed,
-            input.throttle.clamp(-1.0, 1.0) * 6.0,
+            input.throttle.clamp(-1.0, 1.0) * max_speed,
             3.0,
             delta_time,
         );
@@ -104,6 +108,31 @@ fn integrate_axis(velocity: &mut f32, target: f32, response: f32, delta_time: f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn impulso_y_frenado_son_progresivos_y_la_colision_detecta_el_cruce() {
+        let mut flight = FlightController::new(Vec3::new(0.0, 0.0, 10.0));
+        let input = FlightInput {
+            throttle: 1.0,
+            ..Default::default()
+        };
+        flight.update_with_speed(&input, 0.1, crate::navigation::BOOST_SPEED);
+        assert!(flight.speed > 0.0 && flight.speed < crate::navigation::BOOST_SPEED);
+        flight.update_with_speed(&input, 2.0, crate::navigation::BOOST_SPEED);
+        let fast = flight.speed;
+        flight.update_with_speed(&FlightInput::default(), 0.5, 2.0);
+        assert!(flight.speed > 0.0 && flight.speed < fast);
+        assert!(
+            crate::collision::resolve_sphere_collision(
+                Vec3::Z * 10.0,
+                -Vec3::Z * 10.0,
+                Vec3::ZERO,
+                Vec3::ZERO,
+                2.0
+            )
+            .is_some()
+        );
+    }
 
     #[test]
     fn avanzar_un_segundo_es_consistente_con_distintos_pasos() {
