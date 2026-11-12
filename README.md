@@ -182,6 +182,20 @@ La calidad **Normal** dibuja a la resolución del área 3D. **Alta** renderiza a
 
 Alta requiere más trabajo de CPU. Se recomienda Normal para el recorrido en equipos con menor rendimiento. La galería comienza en Alta y puede pasar automáticamente a Normal si varios cuadros consecutivos tardan demasiado; elegir con Q desactiva ese ajuste automático. La ventana y los paneles se adaptan al tamaño disponible.
 
+
+## Requisitos obligatorios para habilitar la evaluación
+
+Esta tabla indica dónde se encuentra la implementación y cómo comprobarla. La validación final corresponde al docente; el video pendiente forma parte de los requisitos de entrega.
+
+| Requisito obligatorio | Estado | Evidencia y forma de comprobarlo |
+| --- | --- | --- |
+| Pipeline propio de software, sin motor gráfico, motor de física ni funciones de dibujo 3D de GPU | Implementado | Transformación y recorte en [pipeline.rs](src/pipeline.rs), rasterización en [triangle.rs](src/triangle.rs), color y profundidad en [framebuffer.rs](src/framebuffer.rs). `glam` aporta operaciones matemáticas y `minifb` presenta el framebuffer. |
+| Sol, nave de modelado propio y al menos un planeta con órbita y rotación dependientes del tiempo | Implementado | Sol y cinco mundos en [main.rs](src/main.rs). La nave se modeló en Blender y se carga desde `Nave_final.obj` y `Nave_final.mtl`. Las posiciones orbitales y matrices de rotación dependen del reloj de [simulation.rs](src/simulation.rs); `INSPECTION_MODE` debe permanecer en `false`. |
+| Acercarse, rodear y alejarse de un planeta sin cambiar de escena, con control de nave y cámara | Implementado; pendiente de mostrar en el video | En **Explorar el sistema**, acercarse con el vuelo, pulsar C cerca del planeta para rodearlo y después alejarse. [flight.rs](src/flight.rs), [local_orbit.rs](src/local_orbit.rs) y [camera.rs](src/camera.rs). La galería es complementaria y no sustituye este recorrido. |
+| Cargar y dibujar modelos 3D usando matrices de modelo, vista y proyección, prueba de profundidad y al menos un fragment shader propio | Implementado | Carga OBJ/MTL en [obj_loader.rs](src/obj_loader.rs), matrices en [pipeline.rs](src/pipeline.rs), profundidad en [framebuffer.rs](src/framebuffer.rs) y materiales por fragmento en [shader.rs](src/shader.rs). |
+| Entregar código fuente, recursos necesarios, instrucciones de ejecución y un video corto del recorrido |implementado| Código y modelos en el repositorio, instrucciones en este README y capturas en `docs/capturas/`. El enlace al video del recorrido continuo sigue pendiente en la sección **Video de demostración**. |
+
+
 ## Características que se solicita evaluar
 
 La siguiente tabla relaciona las funciones implementadas.
